@@ -1,0 +1,145 @@
+module GRedRuntime
+
+public class StateCache extends IScriptable {
+  private let m_game: GameInstance;
+  private let m_player: wref<PlayerPuppet>;
+  private let m_playerSystem: wref<PlayerSystem>;
+  private let m_questsSystem: wref<QuestsSystem>;
+  private let m_statsSystem: wref<StatsSystem>;
+  private let m_delaySystem: wref<DelaySystem>;
+  private let m_transactionSystem: wref<TransactionSystem>;
+  private let m_blackboardSystem: wref<BlackboardSystem>;
+  private let m_scriptableSystems: wref<ScriptableSystemsContainer>;
+  private let m_diagnostics: wref<Diagnostics>;
+
+  public func Initialize(game: GameInstance, diagnostics: ref<Diagnostics>) -> Void {
+    this.m_game = game;
+    this.m_diagnostics = diagnostics;
+  }
+
+  public func Shutdown() -> Void {
+    this.m_player = null;
+    this.m_playerSystem = null;
+    this.m_questsSystem = null;
+    this.m_statsSystem = null;
+    this.m_delaySystem = null;
+    this.m_transactionSystem = null;
+    this.m_blackboardSystem = null;
+    this.m_scriptableSystems = null;
+  }
+
+  public func GetGame() -> GameInstance {
+    return this.m_game;
+  }
+
+  public func SetPlayer(player: wref<PlayerPuppet>) -> Void {
+    this.m_player = player;
+  }
+
+  public func InvalidatePlayer() -> Void {
+    this.m_player = null;
+  }
+
+  public func GetPlayer() -> wref<PlayerPuppet> {
+    if IsDefined(this.m_player) {
+      this.CacheHit();
+      return this.m_player;
+    }
+
+    this.CacheMiss();
+    let playerSystem = this.GetPlayerSystem();
+    if IsDefined(playerSystem) {
+      this.m_player = playerSystem.GetLocalPlayerMainGameObject() as PlayerPuppet;
+    }
+    return this.m_player;
+  }
+
+  public func GetPlayerSystem() -> wref<PlayerSystem> {
+    if IsDefined(this.m_playerSystem) {
+      this.CacheHit();
+      return this.m_playerSystem;
+    }
+
+    this.CacheMiss();
+    this.m_playerSystem = GameInstance.GetPlayerSystem(this.m_game);
+    return this.m_playerSystem;
+  }
+
+  public func GetQuestsSystem() -> wref<QuestsSystem> {
+    if IsDefined(this.m_questsSystem) {
+      this.CacheHit();
+      return this.m_questsSystem;
+    }
+
+    this.CacheMiss();
+    this.m_questsSystem = GameInstance.GetQuestsSystem(this.m_game);
+    return this.m_questsSystem;
+  }
+
+  public func GetStatsSystem() -> wref<StatsSystem> {
+    if IsDefined(this.m_statsSystem) {
+      this.CacheHit();
+      return this.m_statsSystem;
+    }
+
+    this.CacheMiss();
+    this.m_statsSystem = GameInstance.GetStatsSystem(this.m_game);
+    return this.m_statsSystem;
+  }
+
+  public func GetDelaySystem() -> wref<DelaySystem> {
+    if IsDefined(this.m_delaySystem) {
+      this.CacheHit();
+      return this.m_delaySystem;
+    }
+
+    this.CacheMiss();
+    this.m_delaySystem = GameInstance.GetDelaySystem(this.m_game);
+    return this.m_delaySystem;
+  }
+
+  public func GetTransactionSystem() -> wref<TransactionSystem> {
+    if IsDefined(this.m_transactionSystem) {
+      this.CacheHit();
+      return this.m_transactionSystem;
+    }
+
+    this.CacheMiss();
+    this.m_transactionSystem = GameInstance.GetTransactionSystem(this.m_game);
+    return this.m_transactionSystem;
+  }
+
+  public func GetBlackboardSystem() -> wref<BlackboardSystem> {
+    if IsDefined(this.m_blackboardSystem) {
+      this.CacheHit();
+      return this.m_blackboardSystem;
+    }
+
+    this.CacheMiss();
+    this.m_blackboardSystem = GameInstance.GetBlackboardSystem(this.m_game);
+    return this.m_blackboardSystem;
+  }
+
+  public func GetScriptableSystemsContainer() -> wref<ScriptableSystemsContainer> {
+    if IsDefined(this.m_scriptableSystems) {
+      this.CacheHit();
+      return this.m_scriptableSystems;
+    }
+
+    this.CacheMiss();
+    this.m_scriptableSystems = GameInstance.GetScriptableSystemsContainer(this.m_game);
+    return this.m_scriptableSystems;
+  }
+
+  private func CacheHit() -> Void {
+    if IsDefined(this.m_diagnostics) {
+      this.m_diagnostics.StateCacheHit();
+    }
+  }
+
+  private func CacheMiss() -> Void {
+    if IsDefined(this.m_diagnostics) {
+      this.m_diagnostics.StateCacheMiss();
+    }
+  }
+}
