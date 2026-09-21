@@ -10,6 +10,12 @@ public class StateCache extends IScriptable {
   private let m_transactionSystem: wref<TransactionSystem>;
   private let m_blackboardSystem: wref<BlackboardSystem>;
   private let m_scriptableSystems: wref<ScriptableSystemsContainer>;
+  private let m_timeSystem: wref<TimeSystem>;
+  private let m_uiSystem: wref<UISystem>;
+  private let m_statPoolsSystem: wref<StatPoolsSystem>;
+  private let m_targetingSystem: wref<TargetingSystem>;
+  private let m_marketSystem: wref<MarketSystem>;
+  private let m_systemRequestsHandler: wref<inkISystemRequestsHandler>;
   private let m_diagnostics: wref<Diagnostics>;
 
   public func Initialize(game: GameInstance, diagnostics: ref<Diagnostics>) -> Void {
@@ -26,6 +32,12 @@ public class StateCache extends IScriptable {
     this.m_transactionSystem = null;
     this.m_blackboardSystem = null;
     this.m_scriptableSystems = null;
+    this.m_timeSystem = null;
+    this.m_uiSystem = null;
+    this.m_statPoolsSystem = null;
+    this.m_targetingSystem = null;
+    this.m_marketSystem = null;
+    this.m_systemRequestsHandler = null;
   }
 
   public func GetGame() -> GameInstance {
@@ -129,6 +141,72 @@ public class StateCache extends IScriptable {
     this.CacheMiss();
     this.m_scriptableSystems = GameInstance.GetScriptableSystemsContainer(this.m_game);
     return this.m_scriptableSystems;
+  }
+
+  public func GetTimeSystem() -> wref<TimeSystem> {
+    if IsDefined(this.m_timeSystem) {
+      this.CacheHit();
+      return this.m_timeSystem;
+    }
+
+    this.CacheMiss();
+    this.m_timeSystem = GameInstance.GetTimeSystem(this.m_game);
+    return this.m_timeSystem;
+  }
+
+  public func GetUISystem() -> wref<UISystem> {
+    if IsDefined(this.m_uiSystem) {
+      this.CacheHit();
+      return this.m_uiSystem;
+    }
+
+    this.CacheMiss();
+    this.m_uiSystem = GameInstance.GetUISystem(this.m_game);
+    return this.m_uiSystem;
+  }
+
+  public func GetStatPoolsSystem() -> wref<StatPoolsSystem> {
+    if IsDefined(this.m_statPoolsSystem) {
+      this.CacheHit();
+      return this.m_statPoolsSystem;
+    }
+
+    this.CacheMiss();
+    this.m_statPoolsSystem = GameInstance.GetStatPoolsSystem(this.m_game);
+    return this.m_statPoolsSystem;
+  }
+
+  public func GetTargetingSystem() -> wref<TargetingSystem> {
+    if IsDefined(this.m_targetingSystem) {
+      this.CacheHit();
+      return this.m_targetingSystem;
+    }
+
+    this.CacheMiss();
+    this.m_targetingSystem = GameInstance.GetTargetingSystem(this.m_game);
+    return this.m_targetingSystem;
+  }
+
+  public func GetMarketSystem() -> wref<MarketSystem> {
+    if IsDefined(this.m_marketSystem) {
+      this.CacheHit();
+      return this.m_marketSystem;
+    }
+
+    this.CacheMiss();
+    this.m_marketSystem = MarketSystem.GetInstance(this.m_game);
+    return this.m_marketSystem;
+  }
+
+  public func GetSystemRequestsHandler() -> wref<inkISystemRequestsHandler> {
+    if IsDefined(this.m_systemRequestsHandler) {
+      this.CacheHit();
+      return this.m_systemRequestsHandler;
+    }
+
+    this.CacheMiss();
+    this.m_systemRequestsHandler = GameInstance.GetSystemRequestsHandler();
+    return this.m_systemRequestsHandler;
   }
 
   private func CacheHit() -> Void {

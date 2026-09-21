@@ -6,6 +6,7 @@ public class Runtime extends ScriptableSystem {
   private let m_events: ref<EventBus>;
   private let m_input: ref<InputHub>;
   private let m_scheduler: ref<Scheduler>;
+  private let m_context: ref<ContextService>;
   private let m_hooks: ref<HookBus>;
   private let m_diagnostics: ref<Diagnostics>;
   private let m_ready: Bool;
@@ -18,6 +19,9 @@ public class Runtime extends ScriptableSystem {
     this.m_state.Initialize(this.GetGameInstance(), this.m_diagnostics);
 
     this.m_dirty = new DirtyFlags();
+
+    this.m_context = new ContextService();
+    this.m_context.Initialize(this.m_state, this.m_dirty);
 
     this.m_events = new EventBus();
     this.m_events.Initialize(this.m_diagnostics);
@@ -39,6 +43,9 @@ public class Runtime extends ScriptableSystem {
 
     if IsDefined(this.m_scheduler) {
       this.m_scheduler.Shutdown();
+    }
+    if IsDefined(this.m_context) {
+      this.m_context.Shutdown();
     }
     if IsDefined(this.m_input) {
       this.m_input.Shutdown();
@@ -66,6 +73,9 @@ public class Runtime extends ScriptableSystem {
 
     let player = playerSystem.GetLocalPlayerMainGameObject() as PlayerPuppet;
     this.m_state.SetPlayer(player);
+    if IsDefined(this.m_context) {
+      this.m_context.Invalidate();
+    }
     this.m_input.OnPlayerAvailable(player);
     this.m_dirty.Mark(n"PLAYER");
 
@@ -87,7 +97,7 @@ public class Runtime extends ScriptableSystem {
   }
 
   public func GetVersion() -> String {
-    return "0.2.1-pass2";
+    return "0.2.2-pass2";
   }
 
   public func GetStateCache() -> ref<StateCache> { return this.m_state; }
@@ -95,6 +105,7 @@ public class Runtime extends ScriptableSystem {
   public func GetEventBus() -> ref<EventBus> { return this.m_events; }
   public func GetInputHub() -> ref<InputHub> { return this.m_input; }
   public func GetScheduler() -> ref<Scheduler> { return this.m_scheduler; }
+  public func GetContextService() -> ref<ContextService> { return this.m_context; }
   public func GetHookBus() -> ref<HookBus> { return this.m_hooks; }
   public func GetDiagnostics() -> ref<Diagnostics> { return this.m_diagnostics; }
 

@@ -62,6 +62,10 @@ public class DirtyFlags extends IScriptable {
     return false;
   }
 
+  public func ChangedSince(name: CName, lastSeenVersion: Uint32) -> Bool {
+    return this.Version(name) != lastSeenVersion;
+  }
+
   public func Version(name: CName) -> Uint32 {
     let i: Int32 = 0;
     let count = ArraySize(this.m_flags);
