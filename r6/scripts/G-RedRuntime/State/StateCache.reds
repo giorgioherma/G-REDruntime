@@ -16,6 +16,7 @@ public class StateCache extends IScriptable {
   private let m_targetingSystem: wref<TargetingSystem>;
   private let m_marketSystem: wref<MarketSystem>;
   private let m_systemRequestsHandler: wref<inkISystemRequestsHandler>;
+  private let m_preventionSystem: wref<PreventionSystem>;
   private let m_diagnostics: wref<Diagnostics>;
 
   public func Initialize(game: GameInstance, diagnostics: ref<Diagnostics>) -> Void {
@@ -38,6 +39,7 @@ public class StateCache extends IScriptable {
     this.m_targetingSystem = null;
     this.m_marketSystem = null;
     this.m_systemRequestsHandler = null;
+    this.m_preventionSystem = null;
   }
 
   public func GetGame() -> GameInstance {
@@ -207,6 +209,20 @@ public class StateCache extends IScriptable {
     this.CacheMiss();
     this.m_systemRequestsHandler = GameInstance.GetSystemRequestsHandler();
     return this.m_systemRequestsHandler;
+  }
+
+  public func GetPreventionSystem() -> wref<PreventionSystem> {
+    if IsDefined(this.m_preventionSystem) {
+      this.CacheHit();
+      return this.m_preventionSystem;
+    }
+
+    this.CacheMiss();
+    let systems = this.GetScriptableSystemsContainer();
+    if IsDefined(systems) {
+      this.m_preventionSystem = systems.Get(n"PreventionSystem") as PreventionSystem;
+    }
+    return this.m_preventionSystem;
   }
 
   private func CacheHit() -> Void {
