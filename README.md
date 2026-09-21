@@ -1,165 +1,260 @@
-G-RedRuntime — Pass 1 Core Framework
-Version: 0.1.0-pass1
+# G-REDruntime
 
-PURPOSE
-=======
-This is the first permanent REDscript optimization framework pass.
-It is NOT a profiler and it does not require GRSP to run.
+A REDscript runtime and optimization framework for Cyberpunk 2077.
 
-Pass 1 builds the reusable core only. Existing mods are not connected yet.
-The goal of the first test is therefore:
+**Current development version:** `0.2.0-pass2`  
+**Current pass:** Pass 2.0 — Shared Input & Hotpath Integration  
+**Status:** development candidate; Pass 1 is validated, Pass 2.0 is awaiting full compile/runtime/profile acceptance.
 
-1. prove the framework compiles and survives normal gameplay;
-2. measure the empty-framework overhead with GRSP + CapFrameX;
-3. verify that the scheduler stays dormant when no jobs are registered;
-4. verify that the InputHub does not decode input when nobody subscribes;
-5. establish a clean baseline before adapters are added in Pass 2.
+## Purpose
 
-INSTALL
-=======
-Extract into the Cyberpunk 2077 game root.
+G-REDruntime exists to reduce duplicated REDscript work across a heavily modded Cyberpunk 2077 installation.
 
-Installed path:
-  r6\scripts\G-RedRuntime\
+The framework is designed around one rule:
 
-No DLL is involved. These are REDscript files.
+> Shared work should be performed once, centrally, and reused by compatible mods.
 
-DEPENDENCIES
-============
+Instead of multiple mods repeatedly resolving the same game systems, decoding the same input action, polling the same stable state, or stacking equivalent hot-path work, G-REDruntime provides reusable runtime services that integrations can consume.
+
+It is **not a profiler**. GRSP/redscript-profiler is used during development to measure the framework and identify optimization targets, but is not required by G-REDruntime itself.
+
+## Development model
+
+Development is organized into meaningful passes.
+
+Each accepted pass becomes the new base for all later work:
+
+```text
+BASE 0
+  ↓
+Pass 2 tested successfully
+  ↓
+BASE 1
+  ↓
+Pass 3 starts from BASE 1
+  ↓
+...
+```
+
+A patch is not considered part of the accepted base until it has passed:
+
+```text
+compile
+runtime
+functional regression testing
+profiling/review
+```
+
+Later changes to the same file are always built on the last accepted version. Earlier accepted work is never intentionally rolled back.
+
+Third-party mod patches are distributed separately from the framework repository and contain only changed files.
+
+## Pass 1 — Core Framework
+
+Pass 1 established the reusable runtime foundation and has passed compile and runtime testing in the full mod stack.
+
+### Runtime
+
+- `ScriptableSystem` singleton
+- lifecycle ownership
+- shared component access
+- player-attach propagation
+- framework version reporting
+- manual diagnostics dump
+
+### StateCache
+
+Lazy cached access to commonly reused game systems:
+
+- `PlayerSystem`
+- local `PlayerPuppet`
+- `QuestsSystem`
+- `StatsSystem`
+- `DelaySystem`
+- `TransactionSystem`
+- `BlackboardSystem`
+- `ScriptableSystemsContainer`
+
+Cache hit/miss counters are available through diagnostics.
+
+### DirtyFlags
+
+- named dirty flags
+- monotonically increasing version/generation per flag
+- consume-once dirty checks
+- groundwork for version-based shared invalidation
+
+### EventBus
+
+- topic subscriptions
+- wildcard subscriptions
+- explicit unsubscribe handles
+- no dispatch work while empty
+
+### InputHub
+
+Pass 1 introduced the shared input infrastructure:
+
+- one lazily registered input bridge
+- no permanent player input listener while unused
+- action name/type decoded centrally
+- specific-action and wildcard subscriptions
+- listener removed when no subscribers remain
+
+### Scheduler
+
+- one lazy central `DelaySystem` loop
+- dormant while no jobs exist
+- arbitrary interval jobs with a 50 ms minimum
+- repeating and one-shot jobs
+- stale callback generation guard
+- shutdown cancellation
+
+### HookBus
+
+- registration/dispatch infrastructure for future consolidated hooks
+- no broad game-hook takeover in Pass 1
+
+### Diagnostics
+
+Counters for:
+
+- scheduler wakeups
+- scheduler job executions
+- event publications/deliveries
+- input observations/deliveries
+- hook dispatches/deliveries
+- state-cache hits/misses
+
+There is no periodic diagnostic logging.
+
+## Pass 2.0 — Shared Input & Hotpath Integration
+
+Pass 2 is the first real integration pass.
+
+The goal is not to add more framework infrastructure for its own sake. It connects the framework to real workloads and extends the framework only where those integrations require it.
+
+### Framework changes
+
+The Pass 2 InputHub now supports:
+
+- global/wildcard subscriptions
+- specific-action subscriptions
+- automatic switching between global and action-specific engine registration
+- deduplicated registration of specific actions
+- input-consumption propagation through `InputEvent.consumed`
+- central decoding of `ListenerAction.GetName()` and `ListenerAction.GetType()`
+
+The framework version is now:
+
+```text
+0.2.0-pass2
+```
+
+### Integration patch set
+
+The associated Pass 2.0 mod patch set targets representative real workloads:
+
+- `custom_quickslots`
+- `FlushingEtiquette`
+- `BrowserExtension`
+- `Enhanced Vehicle System`
+
+The integration patches are intentionally kept outside this repository so third-party mod source is not duplicated here.
+
+The current optimization direction includes:
+
+- consolidating compatible input processing through G-REDruntime
+- removing repeated action-name/type decoding
+- reducing unnecessary per-action scans
+- caching stable or reusable references where behavior remains live
+- reducing repeated same-callback lookups in hot vehicle input paths
+
+Pass 2.0 is considered accepted only after its complete patch set passes compile, gameplay regression testing, and profiler comparison.
+
+## Performance design rules
+
+G-REDruntime is event-first, but not event-only.
+
+The framework avoids replacing many small polling loops with one permanently expensive central loop. Shared state is sampled only where justified, then changes are propagated to consumers.
+
+Conceptually:
+
+```text
+game state / input
+       ↓
+G-REDruntime
+       ↓
+cache / decode / detect once
+       ↓
+multiple consumers
+```
+
+The framework does **not** use player movement as a global activation boundary. Movement is only relevant to systems that genuinely depend on it.
+
+The framework should remain cheap when integrations are absent.
+
+## Install
+
+Copy the repository's `r6` folder into the Cyberpunk 2077 game root.
+
+Installed framework path:
+
+```text
+Cyberpunk 2077/
+└─ r6/
+   └─ scripts/
+      └─ G-RedRuntime/
+```
+
+## Dependencies
+
 Required:
-  - redscript
+
+- redscript
 
 Not required by the framework core:
-  - Codeware
-  - CET
-  - GRSP
-  - 0-Engine
 
-GRSP + CapFrameX are only used for our performance testing.
-CET is useful only for the optional manual diagnostic command below.
+- Codeware
+- CET
+- GRSP / redscript-profiler
+- TweakXL
+- ArchiveXL
 
-PASS 1 COMPONENTS
-=================
-Core / Runtime
-  - ScriptableSystem singleton
-  - lifecycle ownership
-  - component access
-  - player-attach propagation
+Individual third-party integrations may of course depend on the mods they patch.
 
-State / StateCache
-  - lazy cached GameInstance systems
-  - PlayerSystem
-  - local PlayerPuppet
-  - QuestsSystem
-  - StatsSystem
-  - DelaySystem
-  - TransactionSystem
-  - BlackboardSystem
-  - ScriptableSystemsContainer
-  - cache hit/miss diagnostics
+## Manual diagnostic check
 
-Events / DirtyFlags
-  - named dirty flags
-  - monotonically increasing per-flag generation/version
-  - consume-once dirty checks
+After loading a save, the framework exposes the manual diagnostic helper used during development:
 
-Events / EventBus
-  - topic subscriptions
-  - wildcard topic support
-  - explicit unsubscribe handles
-  - no dispatch work while empty
+```text
+Game.GetPlayer():GRedRuntimeDump()
+```
 
-Input / InputHub
-  - one shared engine input listener, registered lazily only when needed
-  - NO permanent PlayerPuppet.OnAction wrapper in Pass 1
-  - action name/type decoded once only when subscribers exist
-  - action-specific or wildcard subscriptions
-  - listener is unregistered when the last subscriber leaves
+This is not periodic work. It only logs when explicitly invoked.
 
-Scheduler
-  - one lazy central DelaySystem loop
-  - completely dormant when no jobs exist
-  - arbitrary job interval >= 50 ms
-  - repeating and one-shot jobs
-  - generation guard against stale callbacks
-  - shutdown cancellation
+## Repository scope
 
-Hooks / HookBus
-  - registration/dispatch infrastructure for future consolidated game hooks
-  - no additional game hook targets are installed in Pass 1
+This repository contains the G-REDruntime framework source.
 
-Diagnostics
-  - scheduler wakeups / job executions
-  - event publications / deliveries
-  - input observations / deliveries
-  - hook dispatches / deliveries
-  - state-cache hits / misses
-  - no periodic logging
+It does **not** contain complete copies of third-party mods.
 
-IMPORTANT PERFORMANCE DESIGN
-============================
-Pass 1 does NOT start a background scheduler merely because the framework exists.
-The scheduler starts only after the first adapter registers a job and stops when
-there are no enabled jobs.
+Optimization releases are kept as differential patch sets containing only:
 
-InputHub registers no player input listener at all while it has no subscribers.
-ListenerAction.GetName/GetType are therefore not called by G-RedRuntime in the empty framework.
+- changed third-party files
+- new integration files
+- changed G-REDruntime files when applicable
 
-There is no every-frame framework poll in Pass 1.
-There is no movement-state poll in Pass 1.
-There is no automatic quest-fact, combat, UI, equipment, vehicle or blackboard
-polling yet. Those will be added only when the integration data justifies them.
+Framework and third-party mod patches are packaged separately.
 
-MANUAL STATUS CHECK
-===================
-After loading a save, CET console can call:
+## Project status
 
-  Game.GetPlayer():GRedRuntimeDump()
+```text
+Pass 1 — Core Framework
+STATUS: COMPLETE / VALIDATED
 
-This only logs when you manually call it. It is not part of normal runtime work.
-For a fresh framework with no adapters, expected scheduler counters are:
+Pass 2.0 — Shared Input & Hotpath Integration
+STATUS: ACTIVE / CANDIDATE
+```
 
-  scheduler wakeups = 0
-  jobRuns = 0
-  activeJobs = 0
-
-Input/event/hook deliveries should also remain 0 because no adapters are connected.
-State cache misses/hits may show a few lifecycle accesses.
-
-FIRST TEST
-==========
-Keep the rest of the mod stack unchanged.
-
-A. Launch the game.
-B. Check r6\logs\redscript_r*.log for compilation errors.
-C. Load the same save / area used for the established JIG tests.
-D. Optionally run Game.GetPlayer():GRedRuntimeDump() once to confirm readiness.
-E. Run the same clean JIG capture with GRSP and CapFrameX.
-F. Send:
-     - GRSP capture folder
-     - matching CapFrameX capture
-     - redscript log if there was any compile/runtime issue
-
-For Pass 1 we compare against the framework-OFF JIG baseline before attaching any
-existing mod to the framework.
-
-UNINSTALL
-=========
-Delete:
-
-  r6\scripts\G-RedRuntime
-
-No save data is intentionally persisted by Pass 1.
-
-PASS 2 DIRECTION
-================
-If the empty core is clean, Pass 2 will connect a meaningful group of real mods,
-not one tiny adapter at a time. Candidate classes from profiling are:
-
-  - always-on / input-heavy workload
-  - periodic/shared-state polling workload
-  - wrapper-chain workload
-  - burst/amplification workload
-
-The framework will then grow only where those integrations prove a shared primitive
-is useful.
+The profiler remains enabled during development so each meaningful pass can be compared against the accepted baseline.
