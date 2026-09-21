@@ -87,7 +87,7 @@ public class Runtime extends ScriptableSystem {
   }
 
   public func GetVersion() -> String {
-    return "0.2.0-pass2";
+    return "0.2.1-pass2";
   }
 
   public func GetStateCache() -> ref<StateCache> { return this.m_state; }

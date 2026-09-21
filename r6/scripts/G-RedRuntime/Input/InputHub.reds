@@ -17,43 +17,75 @@ public class InputSubscription extends IScriptable {
   public let active: Bool;
 }
 
+public class InputRoute extends IScriptable {
+  public let actionName: CName;
+  public let subscriptions: array<ref<InputSubscription>>;
+}
+
 public class InputBridge extends IScriptable {
   private let m_hub: wref<InputHub>;
+  private let m_specific: Bool;
 
-  public func Initialize(hub: ref<InputHub>) -> Void {
+  public func Initialize(hub: ref<InputHub>, specific: Bool) -> Void {
     this.m_hub = hub;
+    this.m_specific = specific;
   }
 
   protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
-    if IsDefined(this.m_hub) {
-      return this.m_hub.Publish(action);
+    if !IsDefined(this.m_hub) {
+      return false;
     }
-    return false;
+
+    if this.m_specific {
+      return this.m_hub.PublishSpecific(action);
+    }
+    return this.m_hub.PublishWildcard(action);
   }
 }
 
 public class InputHub extends IScriptable {
+  // Master list is lifecycle-only. Hot dispatch does not walk it.
   private let m_subscriptions: array<ref<InputSubscription>>;
+  private let m_wildcardSubscriptions: array<ref<InputSubscription>>;
+  private let m_routes: array<ref<InputRoute>>;
+
   private let m_nextID: Int32;
   private let m_activeCount: Int32;
+  private let m_wildcardCount: Int32;
+  private let m_specificCount: Int32;
+
   private let m_diagnostics: wref<Diagnostics>;
   private let m_state: wref<StateCache>;
-  private let m_bridge: ref<InputBridge>;
+
+  // Wildcard traffic and action-specific traffic use separate engine bridges.
+  // A wildcard consumer therefore no longer forces every input event through
+  // the specific-route dispatcher.
+  private let m_wildcardBridge: ref<InputBridge>;
+  private let m_specificBridge: ref<InputBridge>;
+  private let m_event: ref<InputEvent>;
+
   private let m_registeredPlayer: wref<PlayerPuppet>;
+  private let m_wildcardRegistered: Bool;
   private let m_registeredActions: array<CName>;
-  private let m_registered: Bool;
-  private let m_registeredGlobal: Bool;
 
   public func Initialize(state: ref<StateCache>, diagnostics: ref<Diagnostics>) -> Void {
     this.m_state = state;
     this.m_diagnostics = diagnostics;
     this.m_nextID = 1;
-    this.m_bridge = new InputBridge();
-    this.m_bridge.Initialize(this);
+
+    this.m_wildcardBridge = new InputBridge();
+    this.m_wildcardBridge.Initialize(this, false);
+
+    this.m_specificBridge = new InputBridge();
+    this.m_specificBridge.Initialize(this, true);
+
+    // Dispatch is synchronous. InputEvent is callback-scoped and reused to
+    // avoid allocating an IScriptable object for every engine input callback.
+    this.m_event = new InputEvent();
   }
 
   public func Shutdown() -> Void {
-    this.UnregisterBridge();
+    this.UnregisterAllBridges();
 
     let i: Int32 = 0;
     let count = ArraySize(this.m_subscriptions);
@@ -62,12 +94,18 @@ public class InputHub extends IScriptable {
       this.m_subscriptions[i].listener = null;
       i += 1;
     }
+
+    ArrayClear(this.m_wildcardSubscriptions);
+    ArrayClear(this.m_routes);
     this.m_activeCount = 0;
+    this.m_wildcardCount = 0;
+    this.m_specificCount = 0;
+    this.m_event = null;
   }
 
   public func OnPlayerAvailable(player: wref<PlayerPuppet>) -> Void {
-    if this.m_registered && NotEquals(this.m_registeredPlayer, player) {
-      this.UnregisterBridge();
+    if IsDefined(this.m_registeredPlayer) && NotEquals(this.m_registeredPlayer, player) {
+      this.UnregisterAllBridges();
     }
     this.m_registeredPlayer = player;
     this.RefreshRegistration();
@@ -87,6 +125,16 @@ public class InputHub extends IScriptable {
     this.m_nextID += 1;
     this.m_activeCount += 1;
     ArrayPush(this.m_subscriptions, sub);
+
+    if this.IsWildcard(actionName) {
+      ArrayPush(this.m_wildcardSubscriptions, sub);
+      this.m_wildcardCount += 1;
+    } else {
+      let route = this.GetOrCreateRoute(actionName);
+      ArrayPush(route.subscriptions, sub);
+      this.m_specificCount += 1;
+    }
+
     this.RefreshRegistration();
     return sub.id;
   }
@@ -99,9 +147,21 @@ public class InputHub extends IScriptable {
     let i: Int32 = 0;
     let count = ArraySize(this.m_subscriptions);
     while i < count {
-      if this.m_subscriptions[i].id == id && this.m_subscriptions[i].active {
-        this.m_subscriptions[i].active = false;
-        this.m_subscriptions[i].listener = null;
+      let sub = this.m_subscriptions[i];
+      if sub.id == id && sub.active {
+        if this.IsWildcard(sub.actionName) {
+          this.RemoveSubscription(this.m_wildcardSubscriptions, sub);
+          this.m_wildcardCount -= 1;
+        } else {
+          let route = this.FindRoute(sub.actionName);
+          if IsDefined(route) {
+            this.RemoveSubscription(route.subscriptions, sub);
+          }
+          this.m_specificCount -= 1;
+        }
+
+        sub.active = false;
+        sub.listener = null;
         this.m_activeCount -= 1;
         this.RefreshRegistration();
         return true;
@@ -119,21 +179,18 @@ public class InputHub extends IScriptable {
     if this.m_activeCount <= 0 {
       return false;
     }
-
-    let i: Int32 = 0;
-    let count = ArraySize(this.m_subscriptions);
-    while i < count {
-      let sub = this.m_subscriptions[i];
-      if sub.active && (this.IsWildcard(sub.actionName) || Equals(sub.actionName, actionName)) {
-        return true;
-      }
-      i += 1;
+    if this.m_wildcardCount > 0 {
+      return true;
     }
-    return false;
+
+    let route = this.FindRoute(actionName);
+    return IsDefined(route) && ArraySize(route.subscriptions) > 0;
   }
 
+  // Compatibility path for callers that explicitly route one ListenerAction
+  // through the hub. Engine bridges use the split hot paths below.
   public func Publish(action: ListenerAction) -> Bool {
-    if this.m_activeCount <= 0 {
+    if this.m_activeCount <= 0 || !IsDefined(this.m_event) {
       return false;
     }
 
@@ -141,24 +198,115 @@ public class InputHub extends IScriptable {
       this.m_diagnostics.InputSeen();
     }
 
-    let evt = new InputEvent();
-    evt.actionName = ListenerAction.GetName(action);
-    evt.actionType = ListenerAction.GetType(action);
+    let evt = this.PrepareEvent(action);
+    this.DispatchWildcards(evt);
+    this.DispatchSpecific(evt);
+    return evt.consumed;
+  }
 
+  public func PublishWildcard(action: ListenerAction) -> Bool {
+    if this.m_wildcardCount <= 0 || !IsDefined(this.m_event) {
+      return false;
+    }
+
+    if IsDefined(this.m_diagnostics) {
+      this.m_diagnostics.InputSeen();
+    }
+
+    let evt = this.PrepareEvent(action);
+    this.DispatchWildcards(evt);
+    return evt.consumed;
+  }
+
+  public func PublishSpecific(action: ListenerAction) -> Bool {
+    if this.m_specificCount <= 0 || !IsDefined(this.m_event) {
+      return false;
+    }
+
+    // When a wildcard bridge exists it already counted this engine input.
+    if this.m_wildcardCount <= 0 && IsDefined(this.m_diagnostics) {
+      this.m_diagnostics.InputSeen();
+    }
+
+    let evt = this.PrepareEvent(action);
+    this.DispatchSpecific(evt);
+    return evt.consumed;
+  }
+
+  private func PrepareEvent(action: ListenerAction) -> ref<InputEvent> {
+    this.m_event.actionName = ListenerAction.GetName(action);
+    this.m_event.actionType = ListenerAction.GetType(action);
+    this.m_event.consumed = false;
+    return this.m_event;
+  }
+
+  private func DispatchWildcards(evt: ref<InputEvent>) -> Void {
     let i: Int32 = 0;
-    let count = ArraySize(this.m_subscriptions);
+    let count = ArraySize(this.m_wildcardSubscriptions);
     while i < count {
-      let sub = this.m_subscriptions[i];
-      if sub.active && IsDefined(sub.listener) && (this.IsWildcard(sub.actionName) || Equals(sub.actionName, evt.actionName)) {
-        sub.listener.OnGRedInput(evt);
-        if IsDefined(this.m_diagnostics) {
-          this.m_diagnostics.InputDelivery();
-        }
+      this.m_wildcardSubscriptions[i].listener.OnGRedInput(evt);
+      if IsDefined(this.m_diagnostics) {
+        this.m_diagnostics.InputDelivery();
       }
       i += 1;
     }
+  }
 
-    return evt.consumed;
+  private func DispatchSpecific(evt: ref<InputEvent>) -> Void {
+    let routeIndex: Int32 = 0;
+    let routeCount = ArraySize(this.m_routes);
+    while routeIndex < routeCount {
+      let route = this.m_routes[routeIndex];
+      if Equals(route.actionName, evt.actionName) {
+        let subIndex: Int32 = 0;
+        let subCount = ArraySize(route.subscriptions);
+        while subIndex < subCount {
+          route.subscriptions[subIndex].listener.OnGRedInput(evt);
+          if IsDefined(this.m_diagnostics) {
+            this.m_diagnostics.InputDelivery();
+          }
+          subIndex += 1;
+        }
+        return;
+      }
+      routeIndex += 1;
+    }
+  }
+
+  private func GetOrCreateRoute(actionName: CName) -> ref<InputRoute> {
+    let route = this.FindRoute(actionName);
+    if IsDefined(route) {
+      return route;
+    }
+
+    let newRoute = new InputRoute();
+    newRoute.actionName = actionName;
+    ArrayPush(this.m_routes, newRoute);
+    return newRoute;
+  }
+
+  private func FindRoute(actionName: CName) -> ref<InputRoute> {
+    let i: Int32 = 0;
+    let count = ArraySize(this.m_routes);
+    while i < count {
+      if Equals(this.m_routes[i].actionName, actionName) {
+        return this.m_routes[i];
+      }
+      i += 1;
+    }
+    return null;
+  }
+
+  private func RemoveSubscription(list: script_ref<array<ref<InputSubscription>>>, sub: ref<InputSubscription>) -> Void {
+    let i: Int32 = 0;
+    let count = ArraySize(Deref(list));
+    while i < count {
+      if Equals(Deref(list)[i], sub) {
+        ArrayErase(Deref(list), i);
+        return;
+      }
+      i += 1;
+    }
   }
 
   private func RefreshRegistration() -> Void {
@@ -167,51 +315,56 @@ public class InputHub extends IScriptable {
       player = this.m_state.GetPlayer();
     }
 
-    if !IsDefined(player) || this.m_activeCount <= 0 || !IsDefined(this.m_bridge) {
-      this.UnregisterBridge();
+    if !IsDefined(player) {
+      this.UnregisterAllBridges();
       return;
     }
 
-    if this.m_registered && this.m_registeredGlobal && Equals(this.m_registeredPlayer, player) && this.HasWildcardSubscriber() {
-      return;
+    if IsDefined(this.m_registeredPlayer) && NotEquals(this.m_registeredPlayer, player) {
+      this.UnregisterAllBridges();
     }
-
-    this.UnregisterBridge();
     this.m_registeredPlayer = player;
 
-    if this.HasWildcardSubscriber() {
-      player.RegisterInputListener(this.m_bridge);
-      this.m_registered = true;
-      this.m_registeredGlobal = true;
+    if this.m_wildcardCount > 0 {
+      if !this.m_wildcardRegistered {
+        player.RegisterInputListener(this.m_wildcardBridge);
+        this.m_wildcardRegistered = true;
+      }
+    } else {
+      this.UnregisterWildcardBridge();
+    }
+
+    this.RefreshSpecificRegistration();
+  }
+
+  private func RefreshSpecificRegistration() -> Void {
+    if !IsDefined(this.m_registeredPlayer) || !IsDefined(this.m_specificBridge) {
       return;
     }
 
-    let i: Int32 = 0;
-    let count = ArraySize(this.m_subscriptions);
-    while i < count {
-      let sub = this.m_subscriptions[i];
-      if sub.active && !this.IsWildcard(sub.actionName) && !this.IsRegisteredAction(sub.actionName) {
-        player.RegisterInputListener(this.m_bridge, sub.actionName);
-        ArrayPush(this.m_registeredActions, sub.actionName);
+    // Remove engine registrations whose route no longer has subscribers.
+    let registeredIndex: Int32 = ArraySize(this.m_registeredActions) - 1;
+    while registeredIndex >= 0 {
+      let actionName = this.m_registeredActions[registeredIndex];
+      let route = this.FindRoute(actionName);
+      if !IsDefined(route) || ArraySize(route.subscriptions) <= 0 {
+        this.m_registeredPlayer.UnregisterInputListener(this.m_specificBridge, actionName);
+        ArrayErase(this.m_registeredActions, registeredIndex);
       }
-      i += 1;
+      registeredIndex -= 1;
     }
 
-    this.m_registered = ArraySize(this.m_registeredActions) > 0;
-    this.m_registeredGlobal = false;
-  }
-
-  private func HasWildcardSubscriber() -> Bool {
-    let i: Int32 = 0;
-    let count = ArraySize(this.m_subscriptions);
-    while i < count {
-      let sub = this.m_subscriptions[i];
-      if sub.active && this.IsWildcard(sub.actionName) {
-        return true;
+    // Register newly active routes. Existing routes stay registered.
+    let routeIndex: Int32 = 0;
+    let routeCount = ArraySize(this.m_routes);
+    while routeIndex < routeCount {
+      let route = this.m_routes[routeIndex];
+      if ArraySize(route.subscriptions) > 0 && !this.IsRegisteredAction(route.actionName) {
+        this.m_registeredPlayer.RegisterInputListener(this.m_specificBridge, route.actionName);
+        ArrayPush(this.m_registeredActions, route.actionName);
       }
-      i += 1;
+      routeIndex += 1;
     }
-    return false;
   }
 
   private func IsRegisteredAction(actionName: CName) -> Bool {
@@ -230,23 +383,28 @@ public class InputHub extends IScriptable {
     return Equals(actionName, n"") || Equals(actionName, n"*");
   }
 
-  private func UnregisterBridge() -> Void {
-    if this.m_registered && IsDefined(this.m_registeredPlayer) && IsDefined(this.m_bridge) {
-      if this.m_registeredGlobal {
-        this.m_registeredPlayer.UnregisterInputListener(this.m_bridge);
-      } else {
-        let i: Int32 = 0;
-        let count = ArraySize(this.m_registeredActions);
-        while i < count {
-          this.m_registeredPlayer.UnregisterInputListener(this.m_bridge, this.m_registeredActions[i]);
-          i += 1;
-        }
+  private func UnregisterWildcardBridge() -> Void {
+    if this.m_wildcardRegistered && IsDefined(this.m_registeredPlayer) && IsDefined(this.m_wildcardBridge) {
+      this.m_registeredPlayer.UnregisterInputListener(this.m_wildcardBridge);
+    }
+    this.m_wildcardRegistered = false;
+  }
+
+  private func UnregisterSpecificBridge() -> Void {
+    if IsDefined(this.m_registeredPlayer) && IsDefined(this.m_specificBridge) {
+      let i: Int32 = 0;
+      let count = ArraySize(this.m_registeredActions);
+      while i < count {
+        this.m_registeredPlayer.UnregisterInputListener(this.m_specificBridge, this.m_registeredActions[i]);
+        i += 1;
       }
     }
-
-    this.m_registered = false;
-    this.m_registeredGlobal = false;
     ArrayClear(this.m_registeredActions);
+  }
+
+  private func UnregisterAllBridges() -> Void {
+    this.UnregisterWildcardBridge();
+    this.UnregisterSpecificBridge();
     this.m_registeredPlayer = null;
   }
 }
