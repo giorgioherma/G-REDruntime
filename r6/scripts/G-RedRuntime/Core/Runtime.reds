@@ -26,14 +26,17 @@ public class Runtime extends ScriptableSystem {
     this.m_events = new EventBus();
     this.m_events.Initialize(this.m_diagnostics);
 
+    // Scheduler is initialized before InputHub so low-frequency input-device
+    // observation can use the shared deadline scheduler instead of a global
+    // engine input callback.
+    this.m_scheduler = new Scheduler();
+    this.m_scheduler.Initialize(this, this.m_state, this.m_diagnostics);
+
     this.m_input = new InputHub();
-    this.m_input.Initialize(this.m_state, this.m_diagnostics);
+    this.m_input.Initialize(this.m_state, this.m_diagnostics, this.m_scheduler);
 
     this.m_hooks = new HookBus();
     this.m_hooks.Initialize(this.m_diagnostics);
-
-    this.m_scheduler = new Scheduler();
-    this.m_scheduler.Initialize(this, this.m_state, this.m_diagnostics);
 
     this.m_ready = true;
   }
@@ -41,14 +44,16 @@ public class Runtime extends ScriptableSystem {
   private func OnDetach() -> Void {
     this.m_ready = false;
 
+    // InputHub owns a scheduler-backed device observer in Pass 6; release it
+    // before shutting the scheduler down.
+    if IsDefined(this.m_input) {
+      this.m_input.Shutdown();
+    }
     if IsDefined(this.m_scheduler) {
       this.m_scheduler.Shutdown();
     }
     if IsDefined(this.m_context) {
       this.m_context.Shutdown();
-    }
-    if IsDefined(this.m_input) {
-      this.m_input.Shutdown();
     }
     if IsDefined(this.m_events) {
       this.m_events.Shutdown();
@@ -97,7 +102,7 @@ public class Runtime extends ScriptableSystem {
   }
 
   public func GetVersion() -> String {
-    return "0.4.0-pass4";
+    return "0.6.0-pass6";
   }
 
   public func GetStateCache() -> ref<StateCache> { return this.m_state; }

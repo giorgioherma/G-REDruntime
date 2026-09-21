@@ -53,18 +53,13 @@ public class InputBridge extends IScriptable {
   }
 }
 
-public class InputDeviceBridge extends IScriptable {
-  private let m_hub: wref<InputHub>;
+public class InputDevicePollJob extends ScheduledJob {
+  public let hub: wref<InputHub>;
 
-  public func Initialize(hub: ref<InputHub>) -> Void {
-    this.m_hub = hub;
-  }
-
-  protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
-    if IsDefined(this.m_hub) {
-      this.m_hub.PublishDeviceState();
+  public func Execute(runtime: ref<Runtime>) -> Void {
+    if IsDefined(this.hub) {
+      this.hub.PublishDeviceState();
     }
-    return false;
   }
 }
 
@@ -89,19 +84,21 @@ public class InputHub extends IScriptable {
   // the specific-route dispatcher.
   private let m_wildcardBridge: ref<InputBridge>;
   private let m_specificBridge: ref<InputBridge>;
-  private let m_deviceBridge: ref<InputDeviceBridge>;
   private let m_event: ref<InputEvent>;
+  private let m_scheduler: wref<Scheduler>;
+  private let m_devicePollJob: ref<InputDevicePollJob>;
+  private let m_devicePollJobID: Int32;
 
   private let m_registeredPlayer: wref<PlayerPuppet>;
   private let m_wildcardRegistered: Bool;
-  private let m_deviceRegistered: Bool;
   private let m_deviceKnown: Bool;
   private let m_lastUsedKBM: Bool;
   private let m_registeredActions: array<CName>;
 
-  public func Initialize(state: ref<StateCache>, diagnostics: ref<Diagnostics>) -> Void {
+  public func Initialize(state: ref<StateCache>, diagnostics: ref<Diagnostics>, scheduler: ref<Scheduler>) -> Void {
     this.m_state = state;
     this.m_diagnostics = diagnostics;
+    this.m_scheduler = scheduler;
     this.m_nextID = 1;
 
     this.m_wildcardBridge = new InputBridge();
@@ -110,8 +107,6 @@ public class InputHub extends IScriptable {
     this.m_specificBridge = new InputBridge();
     this.m_specificBridge.Initialize(this, true);
 
-    this.m_deviceBridge = new InputDeviceBridge();
-    this.m_deviceBridge.Initialize(this);
 
     // Dispatch is synchronous. InputEvent is callback-scoped and reused to
     // avoid allocating an IScriptable object for every engine input callback.
@@ -120,6 +115,7 @@ public class InputHub extends IScriptable {
 
   public func Shutdown() -> Void {
     this.UnregisterAllBridges();
+    this.StopDevicePolling();
 
     let i: Int32 = 0;
     let count = ArraySize(this.m_subscriptions);
@@ -146,6 +142,7 @@ public class InputHub extends IScriptable {
     this.m_deviceCount = 0;
     this.m_deviceKnown = false;
     this.m_event = null;
+    this.m_scheduler = null;
   }
 
   public func OnPlayerAvailable(player: wref<PlayerPuppet>) -> Void {
@@ -438,6 +435,7 @@ public class InputHub extends IScriptable {
 
     if !IsDefined(player) {
       this.UnregisterAllBridges();
+      this.StopDevicePolling();
       return;
     }
 
@@ -456,13 +454,9 @@ public class InputHub extends IScriptable {
     }
 
     if this.m_deviceCount > 0 {
-      if !this.m_deviceRegistered {
-        player.RegisterInputListener(this.m_deviceBridge);
-        this.m_deviceRegistered = true;
-        this.m_deviceKnown = false;
-      }
+      this.StartDevicePolling();
     } else {
-      this.UnregisterDeviceBridge();
+      this.StopDevicePolling();
     }
 
     this.RefreshSpecificRegistration();
@@ -533,18 +527,31 @@ public class InputHub extends IScriptable {
     ArrayClear(this.m_registeredActions);
   }
 
-  private func UnregisterDeviceBridge() -> Void {
-    if this.m_deviceRegistered && IsDefined(this.m_registeredPlayer) && IsDefined(this.m_deviceBridge) {
-      this.m_registeredPlayer.UnregisterInputListener(this.m_deviceBridge);
+  private func StartDevicePolling() -> Void {
+    if this.m_deviceCount <= 0 || this.m_devicePollJobID > 0 || !IsDefined(this.m_scheduler) {
+      return;
     }
-    this.m_deviceRegistered = false;
+
+    this.m_deviceKnown = false;
+    this.m_devicePollJob = new InputDevicePollJob();
+    this.m_devicePollJob.hub = this;
+    this.m_devicePollJob.Configure(n"INPUT_DEVICE_STATE", 0.10, true);
+    this.m_devicePollJobID = this.m_scheduler.Register(this.m_devicePollJob);
+  }
+
+  private func StopDevicePolling() -> Void {
+    if IsDefined(this.m_scheduler) && this.m_devicePollJobID > 0 {
+      this.m_scheduler.Unregister(this.m_devicePollJobID);
+    }
+    this.m_devicePollJobID = 0;
+    this.m_devicePollJob = null;
     this.m_deviceKnown = false;
   }
 
   private func UnregisterAllBridges() -> Void {
     this.UnregisterWildcardBridge();
-    this.UnregisterDeviceBridge();
     this.UnregisterSpecificBridge();
     this.m_registeredPlayer = null;
+    this.m_deviceKnown = false;
   }
 }

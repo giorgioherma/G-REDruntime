@@ -109,6 +109,7 @@ public class Scheduler extends IScriptable {
   private let m_activeJobs: Int32;
   private let m_running: Bool;
   private let m_inTick: Bool;
+  private let m_needsCompact: Bool;
   private let m_generation: Uint32;
   private let m_minDelay: Float;
   private let m_delayID: DelayID;
@@ -125,6 +126,7 @@ public class Scheduler extends IScriptable {
   public func Shutdown() -> Void {
     this.m_running = false;
     this.m_inTick = false;
+    this.m_needsCompact = false;
     this.m_generation += 1u;
     this.CancelCurrentDelay();
 
@@ -169,6 +171,7 @@ public class Scheduler extends IScriptable {
       if IsDefined(job) && job.GetID() == id && job.IsEnabled() {
         job.Disable();
         this.m_activeJobs -= 1;
+        this.m_needsCompact = true;
 
         // Do not rebuild the DelaySystem callback while OnTick is iterating.
         // The disabled job is compacted and the next wakeup is chosen once.
@@ -248,13 +251,16 @@ public class Scheduler extends IScriptable {
         // job is enabled, then it is retired unless user code already did so.
         if !job.IsRepeating() && job.IsEnabled() {
           job.Disable();
+          this.m_needsCompact = true;
         }
       }
       i += 1;
     }
 
     this.m_inTick = false;
-    this.CompactJobs();
+    if this.m_needsCompact {
+      this.CompactJobs();
+    }
     this.ScheduleNext();
   }
 
@@ -336,6 +342,7 @@ public class Scheduler extends IScriptable {
     }
 
     this.m_activeJobs = active;
+    this.m_needsCompact = false;
   }
 
   private func CancelCurrentDelay() -> Void {
