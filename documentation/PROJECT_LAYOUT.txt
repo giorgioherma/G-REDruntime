@@ -1,0 +1,14 @@
+G-RedRuntime Pass 1 source layout
+
+r6/scripts/G-RedRuntime/
+  Core/Runtime.reds
+  State/StateCache.reds
+  Events/DirtyFlags.reds
+  Events/EventBus.reds
+  Input/InputHub.reds
+  Input/PlayerExtensions.reds
+  Scheduler/Scheduler.reds
+  Hooks/HookBus.reds
+  Diagnostics/Diagnostics.reds
+
+Root documentation files are packaging/test documentation and are not loaded by redscript.

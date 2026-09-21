@@ -1,0 +1,27 @@
+{
+  "name": "G-RedRuntime",
+  "version": "0.1.0-pass1",
+  "type": "REDscript shared optimization framework",
+  "install_path": "r6/scripts/G-RedRuntime",
+  "persistent_save_data": false,
+  "dependencies": ["redscript"],
+  "optional_test_tools": ["GRSP", "CapFrameX", "CET"],
+  "pass": 1,
+  "scope": [
+    "lifecycle core",
+    "lazy shared state cache",
+    "dirty flags",
+    "event bus",
+    "input hub",
+    "lazy central scheduler",
+    "hook bus infrastructure",
+    "manual diagnostics"
+  ],
+  "runtime_policy": {
+    "every_frame_poll": false,
+    "scheduler_when_empty": false,
+    "input_decode_when_no_subscribers": false,
+    "periodic_logging": false,
+    "automatic_state_polling": false
+  }
+}

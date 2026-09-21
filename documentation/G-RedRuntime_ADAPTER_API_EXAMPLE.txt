@@ -1,0 +1,52 @@
+G-RedRuntime Pass 1 — adapter API sketch
+=========================================
+This file is documentation only; it is NOT compiled.
+
+All framework types live in:
+
+  module GRedRuntime
+
+Typical adapter setup:
+
+  let runtime = GRedRuntime.Runtime.Get(gameInstance);
+  let player = runtime.GetStateCache().GetPlayer();
+  let quests = runtime.GetStateCache().GetQuestsSystem();
+
+DIRTY FLAGS
+-----------
+  runtime.GetDirtyFlags().Mark(n"MY_STATE");
+  if runtime.GetDirtyFlags().Consume(n"MY_STATE") { ... }
+
+EVENT BUS
+---------
+Subclass GRedRuntime.EventListener and implement OnGRedEvent.
+Register with:
+
+  let handle = runtime.GetEventBus().Subscribe(n"PLAYER", listener);
+
+INPUT HUB
+---------
+Subclass GRedRuntime.InputListener and implement OnGRedInput.
+Register one action:
+
+  let handle = runtime.GetInputHub().Subscribe(n"Jump", listener);
+
+Use n"" to receive every action. The InputHub decodes action name/type only when
+at least one subscription exists.
+
+SCHEDULER
+---------
+Subclass GRedRuntime.ScheduledJob and implement Execute(runtime).
+Configure and register:
+
+  job.Configure(n"MyJob", 0.25, true);
+  let handle = runtime.GetScheduler().Register(job);
+
+The central scheduler does not run until the first job is registered.
+
+HOOK BUS
+--------
+Subclass GRedRuntime.HookListener and implement OnGRedHook.
+Future framework-owned game wrappers will publish typed HookContext subclasses to
+this bus. Pass 1 provides the bus but intentionally does not install a library of
+framework game hooks yet.
