@@ -10,6 +10,16 @@ public class InputListener extends IScriptable {
   public func OnGRedInput(evt: ref<InputEvent>) -> Void {}
 }
 
+public class InputDeviceListener extends IScriptable {
+  public func OnGRedInputDeviceChanged(lastUsedKBM: Bool) -> Void {}
+}
+
+public class InputDeviceSubscription extends IScriptable {
+  public let id: Int32;
+  public let listener: ref<InputDeviceListener>;
+  public let active: Bool;
+}
+
 public class InputSubscription extends IScriptable {
   public let id: Int32;
   public let actionName: CName;
@@ -43,16 +53,33 @@ public class InputBridge extends IScriptable {
   }
 }
 
+public class InputDeviceBridge extends IScriptable {
+  private let m_hub: wref<InputHub>;
+
+  public func Initialize(hub: ref<InputHub>) -> Void {
+    this.m_hub = hub;
+  }
+
+  protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
+    if IsDefined(this.m_hub) {
+      this.m_hub.PublishDeviceState();
+    }
+    return false;
+  }
+}
+
 public class InputHub extends IScriptable {
   // Master list is lifecycle-only. Hot dispatch does not walk it.
   private let m_subscriptions: array<ref<InputSubscription>>;
   private let m_wildcardSubscriptions: array<ref<InputSubscription>>;
   private let m_routes: array<ref<InputRoute>>;
+  private let m_deviceSubscriptions: array<ref<InputDeviceSubscription>>;
 
   private let m_nextID: Int32;
   private let m_activeCount: Int32;
   private let m_wildcardCount: Int32;
   private let m_specificCount: Int32;
+  private let m_deviceCount: Int32;
 
   private let m_diagnostics: wref<Diagnostics>;
   private let m_state: wref<StateCache>;
@@ -62,10 +89,14 @@ public class InputHub extends IScriptable {
   // the specific-route dispatcher.
   private let m_wildcardBridge: ref<InputBridge>;
   private let m_specificBridge: ref<InputBridge>;
+  private let m_deviceBridge: ref<InputDeviceBridge>;
   private let m_event: ref<InputEvent>;
 
   private let m_registeredPlayer: wref<PlayerPuppet>;
   private let m_wildcardRegistered: Bool;
+  private let m_deviceRegistered: Bool;
+  private let m_deviceKnown: Bool;
+  private let m_lastUsedKBM: Bool;
   private let m_registeredActions: array<CName>;
 
   public func Initialize(state: ref<StateCache>, diagnostics: ref<Diagnostics>) -> Void {
@@ -78,6 +109,9 @@ public class InputHub extends IScriptable {
 
     this.m_specificBridge = new InputBridge();
     this.m_specificBridge.Initialize(this, true);
+
+    this.m_deviceBridge = new InputDeviceBridge();
+    this.m_deviceBridge.Initialize(this);
 
     // Dispatch is synchronous. InputEvent is callback-scoped and reused to
     // avoid allocating an IScriptable object for every engine input callback.
@@ -95,11 +129,22 @@ public class InputHub extends IScriptable {
       i += 1;
     }
 
+    let deviceIndex: Int32 = 0;
+    let deviceCount = ArraySize(this.m_deviceSubscriptions);
+    while deviceIndex < deviceCount {
+      this.m_deviceSubscriptions[deviceIndex].active = false;
+      this.m_deviceSubscriptions[deviceIndex].listener = null;
+      deviceIndex += 1;
+    }
+
     ArrayClear(this.m_wildcardSubscriptions);
     ArrayClear(this.m_routes);
+    ArrayClear(this.m_deviceSubscriptions);
     this.m_activeCount = 0;
     this.m_wildcardCount = 0;
     this.m_specificCount = 0;
+    this.m_deviceCount = 0;
+    this.m_deviceKnown = false;
     this.m_event = null;
   }
 
@@ -141,6 +186,41 @@ public class InputHub extends IScriptable {
 
   public func SubscribeAll(listener: ref<InputListener>) -> Int32 {
     return this.Subscribe(n"*", listener);
+  }
+
+  public func SubscribeDevice(listener: ref<InputDeviceListener>) -> Int32 {
+    if !IsDefined(listener) {
+      return 0;
+    }
+
+    let sub = new InputDeviceSubscription();
+    sub.id = this.m_nextID;
+    sub.listener = listener;
+    sub.active = true;
+
+    this.m_nextID += 1;
+    this.m_deviceCount += 1;
+    ArrayPush(this.m_deviceSubscriptions, sub);
+    this.RefreshRegistration();
+    return sub.id;
+  }
+
+  public func UnsubscribeDevice(id: Int32) -> Bool {
+    let i: Int32 = 0;
+    let count = ArraySize(this.m_deviceSubscriptions);
+    while i < count {
+      let sub = this.m_deviceSubscriptions[i];
+      if sub.id == id && sub.active {
+        sub.active = false;
+        sub.listener = null;
+        this.m_deviceCount -= 1;
+        ArrayErase(this.m_deviceSubscriptions, i);
+        this.RefreshRegistration();
+        return true;
+      }
+      i += 1;
+    }
+    return false;
   }
 
   public func Unsubscribe(id: Int32) -> Bool {
@@ -185,6 +265,47 @@ public class InputHub extends IScriptable {
 
     let route = this.FindRoute(actionName);
     return IsDefined(route) && ArraySize(route.subscriptions) > 0;
+  }
+
+  public func HasDeviceSubscribers() -> Bool {
+    return this.m_deviceCount > 0;
+  }
+
+  public func PublishDeviceState() -> Void {
+    if this.m_deviceCount <= 0 {
+      return;
+    }
+
+    let player = this.m_registeredPlayer;
+    if !IsDefined(player) && IsDefined(this.m_state) {
+      player = this.m_state.GetPlayer();
+    }
+    if !IsDefined(player) {
+      return;
+    }
+
+    let currentLastUsedKBM = player.PlayerLastUsedKBM();
+    if !this.m_deviceKnown {
+      this.m_lastUsedKBM = currentLastUsedKBM;
+      this.m_deviceKnown = true;
+      return;
+    }
+
+    if Equals(currentLastUsedKBM, this.m_lastUsedKBM) {
+      return;
+    }
+
+    this.m_lastUsedKBM = currentLastUsedKBM;
+
+    let i: Int32 = 0;
+    let count = ArraySize(this.m_deviceSubscriptions);
+    while i < count {
+      let sub = this.m_deviceSubscriptions[i];
+      if IsDefined(sub) && sub.active && IsDefined(sub.listener) {
+        sub.listener.OnGRedInputDeviceChanged(currentLastUsedKBM);
+      }
+      i += 1;
+    }
   }
 
   // Compatibility path for callers that explicitly route one ListenerAction
@@ -334,6 +455,16 @@ public class InputHub extends IScriptable {
       this.UnregisterWildcardBridge();
     }
 
+    if this.m_deviceCount > 0 {
+      if !this.m_deviceRegistered {
+        player.RegisterInputListener(this.m_deviceBridge);
+        this.m_deviceRegistered = true;
+        this.m_deviceKnown = false;
+      }
+    } else {
+      this.UnregisterDeviceBridge();
+    }
+
     this.RefreshSpecificRegistration();
   }
 
@@ -402,8 +533,17 @@ public class InputHub extends IScriptable {
     ArrayClear(this.m_registeredActions);
   }
 
+  private func UnregisterDeviceBridge() -> Void {
+    if this.m_deviceRegistered && IsDefined(this.m_registeredPlayer) && IsDefined(this.m_deviceBridge) {
+      this.m_registeredPlayer.UnregisterInputListener(this.m_deviceBridge);
+    }
+    this.m_deviceRegistered = false;
+    this.m_deviceKnown = false;
+  }
+
   private func UnregisterAllBridges() -> Void {
     this.UnregisterWildcardBridge();
+    this.UnregisterDeviceBridge();
     this.UnregisterSpecificBridge();
     this.m_registeredPlayer = null;
   }
