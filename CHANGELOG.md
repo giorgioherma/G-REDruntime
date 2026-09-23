@@ -4,6 +4,16 @@ All notable G-REDruntime development passes are recorded here.
 
 A pass is only marked **Accepted** after compile, runtime, functional, and profiling review. Candidate builds do not automatically become the next base.
 
+## [Unreleased] — Compatibility contract
+
+- Locked the framework to the existing Cyberpunk REDscript mod layout instead of defining a new mod package format.
+- Third-party mods keep their normal `r6/scripts` paths.
+- No framework-specific manifest is required from integrated mods.
+- Optional-mod adapters stay outside the core so optional mods do not become hard dependencies.
+- Integrations are differential in-place overlays; unknown/unproven mods remain untouched.
+- Clarified that format compatibility does not require every patched implementation file to remain byte-identical.
+- Added `documentation/COMPATIBILITY_CONTRACT.md`.
+
 ## [0.2.0-pass2] — Pass 2.0: Shared Input & Hotpath Integration
 
 **Status:** Candidate / awaiting full acceptance
