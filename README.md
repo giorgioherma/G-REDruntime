@@ -189,6 +189,8 @@ leave unknown/unproven mods untouched
 
 A mod integration may change implementation code when profiling proves the need, but it should not require a new package format. See `documentation/COMPATIBILITY_CONTRACT.md`.
 
+For concrete package/adaptation patterns, see `documentation/INTEGRATION_OVERLAY_MODEL.md`.
+
 ## Performance design rules
 
 G-REDruntime is event-first, but not event-only.

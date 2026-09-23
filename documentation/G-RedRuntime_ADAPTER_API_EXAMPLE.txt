@@ -1,6 +1,14 @@
-G-RedRuntime Pass 1 — adapter API sketch
-=========================================
+G-RedRuntime 0.6 integration adapter API sketch
+===============================================
 This file is documentation only; it is NOT compiled.
+
+Adapters are integration-overlay files. Keep them with the existing mod they adapt;
+do not move optional-mod adapters into the G-RedRuntime core because naming optional
+mod types there would turn those mods into hard compile dependencies.
+
+Prefer an additive adapter/wrapper when it can preserve behavior. Patch an original
+mod file only when the measured optimization cannot be expressed safely from an
+additive boundary. Existing mod paths and public APIs remain authoritative.
 
 All framework types live in:
 
@@ -31,8 +39,8 @@ Register one action:
 
   let handle = runtime.GetInputHub().Subscribe(n"Jump", listener);
 
-Use n"" to receive every action. The InputHub decodes action name/type only when
-at least one subscription exists.
+Use n"" or n"*" to receive every action. Prefer a specific action whenever the
+integration does not truly need wildcard traffic.
 
 SCHEDULER
 ---------
@@ -47,6 +55,6 @@ The central scheduler does not run until the first job is registered.
 HOOK BUS
 --------
 Subclass GRedRuntime.HookListener and implement OnGRedHook.
-Future framework-owned game wrappers will publish typed HookContext subclasses to
-this bus. Pass 1 provides the bus but intentionally does not install a library of
-framework game hooks yet.
+Framework-owned wrappers may publish typed HookContext subclasses to this bus.
+Do not add an optional mod's wrapper to the core merely to centralize it; keep
+optional-mod adapters in that mod's integration overlay.
