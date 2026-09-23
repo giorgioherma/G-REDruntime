@@ -2,9 +2,9 @@
 
 A REDscript runtime and optimization framework for Cyberpunk 2077.
 
-**Current development version:** `0.2.0-pass2`  
-**Current pass:** Pass 2.0 — Shared Input & Hotpath Integration  
-**Status:** development candidate; Pass 1 is validated, Pass 2.0 is awaiting full compile/runtime/profile acceptance.
+**Current source version:** `0.6.0-pass6`  
+**Current framework line:** Pass 6 — frame-pacing / shared-runtime refinement  
+**Status:** development source; acceptance still depends on compile, runtime, regression and profiling review.
 
 ## Purpose
 
@@ -172,6 +172,23 @@ The current optimization direction includes:
 
 Pass 2.0 is considered accepted only after its complete patch set passes compile, gameplay regression testing, and profiler comparison.
 
+## Compatibility-first integration
+
+G-REDruntime fits the mod layout already installed; mods do not need to be repackaged into a framework-specific structure.
+
+The compatibility contract is:
+
+```text
+preserve existing r6/scripts paths
+preserve public mod surface where possible
+require no framework-specific manifest
+keep optional adapters outside the core
+ship measured changes as differential in-place overlays
+leave unknown/unproven mods untouched
+```
+
+A mod integration may change implementation code when profiling proves the need, but it should not require a new package format. See `documentation/COMPATIBILITY_CONTRACT.md`.
+
 ## Performance design rules
 
 G-REDruntime is event-first, but not event-only.
@@ -249,12 +266,8 @@ Framework and third-party mod patches are packaged separately.
 
 ## Project status
 
-```text
-Pass 1 — Core Framework
-STATUS: COMPLETE / VALIDATED
+The repository source currently reports `0.6.0-pass6`. Earlier README text lagged behind the implemented framework passes.
 
-Pass 2.0 — Shared Input & Hotpath Integration
-STATUS: ACTIVE / CANDIDATE
-```
+Pass 1 remains the explicitly documented validated baseline. Later passes remain development work until their compile/runtime/regression/profile acceptance is recorded.
 
 The profiler remains enabled during development so each meaningful pass can be compared against the accepted baseline.
